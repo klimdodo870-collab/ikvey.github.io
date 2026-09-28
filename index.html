@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spin the Wheel 1–10</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3efff; --ink:#1d1440; --muted:#6a5f8f; --panel:#ffffff; --accent:#ff5d8f; --accent-ink:#ffffff; --line:#d9d0f5;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#150f2e; --ink:#f4efff; --muted:#a99fd1; --panel:#231a45; --line:#3a2d6b;}
+}
+:root[data-theme="dark"]{--bg:#150f2e; --ink:#f4efff; --muted:#a99fd1; --panel:#231a45; --line:#3a2d6b;}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+  font-family:"Baloo 2",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:20px; padding:24px 16px;
+}
+h1{margin:0; font-size:clamp(28px,6vw,44px); font-weight:800; letter-spacing:-.01em}
+.stage{position:relative; width:min(88vw,460px); aspect-ratio:1}
+canvas{width:100%; height:100%; display:block; cursor:pointer; border-radius:50%; filter:drop-shadow(0 10px 24px rgba(40,20,90,.28))}
+.pointer{
+  position:absolute; left:50%; top:-8px; transform:translateX(-50%);
+  width:0; height:0; border-left:16px solid transparent; border-right:16px solid transparent;
+  border-top:34px solid var(--ink); filter:drop-shadow(0 2px 2px rgba(0,0,0,.3)); pointer-events:none;
+}
+.result{
+  min-height:64px; font-size:clamp(20px,4vw,26px); font-weight:600; color:var(--muted);
+  display:flex; align-items:baseline; gap:10px;
+}
+.result b{font-size:clamp(44px,9vw,64px); font-weight:800; color:var(--ink); line-height:1}
+button.spin{
+  font:inherit; font-size:22px; font-weight:800; padding:12px 44px; border:0; border-radius:999px;
+  background:var(--accent); color:var(--accent-ink); cursor:pointer; box-shadow:0 5px 0 rgba(0,0,0,.22);
+  transition:transform .08s, box-shadow .08s;
+}
+button.spin:active:not(:disabled){transform:translateY(3px); box-shadow:0 2px 0 rgba(0,0,0,.22)}
+button.spin:disabled{opacity:.55; cursor:default}
+button:focus-visible,canvas:focus-visible{outline:3px solid var(--ink); outline-offset:4px}
+.history{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:460px; min-height:36px}
+.history span{
+  min-width:36px; height:36px; padding:0 8px; display:grid; place-items:center; border-radius:10px;
+  background:var(--panel); border:2px solid var(--line); font-weight:800;
+}
+.history:empty::before{content:"Your spins will show up here."; color:var(--muted); font-size:16px}
+button.mute{
+  font:inherit; font-size:16px; font-weight:600; padding:6px 18px; border-radius:999px;
+  border:2px solid var(--line); background:var(--panel); color:var(--ink); cursor:pointer;
+}
+</style>
+</head>
+<body>
+<h1>Spin the wheel</h1>
+<div class="stage">
+  <canvas id="wheel" tabindex="0" aria-label="Wheel with numbers 1 to 10. Press to spin."></canvas>
+  <div class="pointer"></div>
+</div>
+<div class="result" aria-live="polite"><span id="label">Press spin to pick a number</span><b id="num"></b></div>
+<button class="spin" id="spin">Spin</button>
+<div class="history" id="history" aria-label="Previous spins"></div>
+<button class="mute" id="mute" aria-pressed="true">Sound: on</button>
+
+<script>
+(function(){
+  var N=10, SEG=2*Math.PI/N, TAU=2*Math.PI;
+  var COLORS=["#ff5d8f","#ffb23f","#3ddc97","#3fa9ff","#a26bff","#ff7a45","#20c4c4","#e64fd0","#8bd450","#5b6cff"];
+  var canvas=document.getElementById("wheel"), ctx=canvas.getContext("2d");
+  var spinBtn=document.getElementById("spin"), num=document.getElementById("num"),
+      label=document.getElementById("label"), hist=document.getElementById("history");
+  var rot=0, spinning=false, size=0, lastIdx=0;
+  var audio=null, soundOn=true;
+  var reduce=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function mod(a,b){return ((a%b)+b)%b}
+  function segAt(){return Math.floor(mod(-rot,TAU)/SEG)}
+
+  function getAudio(){
+    if(!audio){var AC=window.AudioContext||window.webkitAudioContext; if(AC) audio=new AC();}
+    if(audio&&audio.state==="suspended") audio.resume();
+    return audio;
+  }
+  function tone(freq,dur,type,vol,delay){
+    if(!soundOn) return;
+    var a=getAudio(); if(!a) return;
+    var t=a.currentTime+(delay||0), o=a.createOscillator(), g=a.createGain();
+    o.type=type; o.frequency.value=freq;
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol,t+0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t+dur+0.02);
+  }
+  function tick(){tone(900,0.05,"triangle",0.18)}
+  function chime(){[523,659,784,1047].forEach(function(f,i){tone(f,0.35,"sine",0.22,i*0.13)})}
+
+  function resize(){
+    var dpr=window.devicePixelRatio||1, w=canvas.clientWidth;
+    size=w; canvas.width=w*dpr; canvas.height=w*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    draw();
+  }
+
+  function draw(){
+    var c=size/2, R=c-6;
+    ctx.clearRect(0,0,size,size);
+    for(var i=0;i<N;i++){
+      var a0=-Math.PI/2+rot+i*SEG, a1=a0+SEG;
+      ctx.beginPath(); ctx.moveTo(c,c); ctx.arc(c,c,R,a0,a1); ctx.closePath();
+      ctx.fillStyle=COLORS[i]; ctx.fill();
+      ctx.lineWidth=3; ctx.strokeStyle="rgba(255,255,255,.9)"; ctx.stroke();
+      ctx.save();
+      ctx.translate(c,c); ctx.rotate(a0+SEG/2+Math.PI/2);
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillStyle="#fff"; ctx.font="800 "+Math.round(size*0.1)+"px 'Baloo 2',system-ui,sans-serif";
+      ctx.shadowColor="rgba(0,0,0,.25)"; ctx.shadowBlur=3;
+      ctx.fillText(String(i+1),0,-(R-size*0.09));
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(c,c,R,0,TAU); ctx.lineWidth=6; ctx.strokeStyle="rgba(255,255,255,.95)"; ctx.stroke();
+    ctx.beginPath(); ctx.arc(c,c,size*0.06,0,TAU); ctx.fillStyle="#fff"; ctx.fill();
+    ctx.beginPath(); ctx.arc(c,c,size*0.025,0,TAU); ctx.fillStyle="#1d1440"; ctx.fill();
+  }
+
+  function spin(){
+    if(spinning) return;
+    spinning=true; spinBtn.disabled=true; num.textContent=""; label.textContent="Spinning…";
+    if(soundOn) getAudio();
+    lastIdx=segAt();
+    var winner=Math.floor(Math.random()*N);
+    var jitter=(Math.random()-.5)*SEG*0.7;
+    var target=-((winner+.5)*SEG+jitter);
+    var start=rot, extra=(reduce?1:5+Math.floor(Math.random()*3))*TAU;
+    var delta=mod(target-start,TAU)+extra;
+    var dur=reduce?600:4600, t0=null;
+    function step(t){
+      if(t0===null) t0=t;
+      var p=Math.min((t-t0)/dur,1), e=1-Math.pow(1-p,4);
+      rot=start+delta*e; draw();
+      var idx=segAt(); if(idx!==lastIdx){lastIdx=idx; tick();}
+      if(p<1){requestAnimationFrame(step)} else finish(winner);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function finish(winner){
+    rot=mod(rot,TAU); spinning=false; spinBtn.disabled=false;
+    label.textContent="You got"; num.textContent=winner+1;
+    chime();
+    var chip=document.createElement("span"); chip.textContent=winner+1;
+    hist.insertBefore(chip,hist.firstChild);
+    while(hist.children.length>10) hist.removeChild(hist.lastChild);
+  }
+
+  var muteBtn=document.getElementById("mute");
+  muteBtn.addEventListener("click",function(){
+    soundOn=!soundOn;
+    muteBtn.textContent="Sound: "+(soundOn?"on":"off");
+    muteBtn.setAttribute("aria-pressed",String(soundOn));
+  });
+  spinBtn.addEventListener("click",spin);
+  canvas.addEventListener("click",spin);
+  canvas.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();spin()}});
+  window.addEventListener("resize",resize);
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(draw);
+  resize();
+})();
+</script>
+</body>
+</html>
